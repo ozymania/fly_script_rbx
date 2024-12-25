@@ -1,0 +1,270 @@
+--ozymania on disc.--
+
+----- VARIABLES -----
+
+local player = game.Players.LocalPlayer
+local character = player.Character
+local humanoid = character:FindFirstChildOfClass("Humanoid")
+local hrp = humanoid.RootPart
+local cas = game.ContextActionService
+local uis = game.UserInputService
+local rs = game["Run Service"]
+local flyingBool = script.Flying
+local speed = script.Speed.Value
+local flying = false
+local keyTab = {}
+local direction = {}
+local bPos, bGyro, antiLoop, humChanged, att
+local noclip = false
+
+------ FUNCTIONS ------
+
+function Check() -- utilized to return true, if it returns false the script should stop working without any error
+	if flyingBool.Parent == script then
+		return true
+	end
+end
+
+function getCFrame(part, isFor) -- part = physical object, isFor = boolean (true = use for movement, false = use for camera)
+	local CFrame = part.CFrame
+	local noRot = CFrame.new(CFrame.Position)
+	local x, y, z = (workspace.CurrentCamera.CFrame - workspace.CurrentCamera.CFrame.Position):ToEulerAnglesXYZ()
+	return noRot * CFrame.Angles(isFor and z or x, y, z)
+end
+
+function computeDir(part, mdir) -- compute move direction of arg 1
+	local dirs = {
+		Forward = ((getCFrame(part, true)* CFrame.new(0, 0, -1)) - part.CFrame.Position).Position,
+		Backward = ((getCFrame(part, true)* CFrame.new(0, 0, 1)) - part.CFrame.Position).Position,
+		Left = ((getCFrame(part)* CFrame.new(-1, 0, 0)) - part.CFrame.Position).Position,
+		Right = ((getCFrame(part)* CFrame.new(1, 0, 0)) - part.CFrame.Position).Position,
+	}
+	
+	for i, v in next,dirs do
+		if (v - mdir).Magnitude <= 1.05 and mdir ~= Vector3.new(0,0,0) then
+			direction[i] = true
+		elseif not keyTab[i] then
+			direction[i] = false
+		end
+	end
+end
+
+function Start() -- starts main loop here
+	local curSpeed = 0
+	speed = tonumber(game.Players.LocalPlayer.PlayerGui.Fly.Background.Speed.TextBox.Text) -- adjusts speed to set value in GUI
+	local speedInc = speed
+	if tonumber(speedInc) == nil then
+		speedInc = 2
+		speed = 2
+	end
+	local camera = workspace.CurrentCamera
+	local antiReLoop = {}
+	local realPos = hrp.CFrame
+
+	bPos, bGyro = Instance.new("AlignPosition"), Instance.new("AlignOrientation")
+
+	att = Instance.new("Attachment")
+
+	att.Parent = hrp
+
+	bPos.Attachment0 = att
+	bPos.Mode = 0
+	bPos.MaxForce = math.huge
+	bPos.Position = hrp.Position
+	bPos.Parent = hrp
+
+	bGyro.Attachment0 = att
+	bGyro.Mode = 0
+	bGyro.MaxTorque = 9e900
+	bGyro.CFrame = hrp.CFrame
+	bGyro.Parent = hrp
+
+	antiLoop = antiReLoop
+
+	while flying and antiLoop == antiReLoop and Check() do -- when all checks are true, we fly!
+		local new = bGyro.CFrame - bGyro.CFrame.p + bPos.Position
+		hrp.Running:Stop()
+		if not direction.Forward and not direction.Backward and not direction.Up and not direction.Down and not direction.Left and not direction.Right then
+			curSpeed = 1
+		else
+			if direction.Up then
+				new = new * CFrame.new(0, curSpeed, 0)
+				curSpeed = curSpeed + speedInc
+			end
+
+			if direction.Down then
+				new = new * CFrame.new(0, -curSpeed, 0)
+				curSpeed = curSpeed + speedInc
+			end
+
+			if direction.Forward then
+				new = new + camera.CFrame.LookVector * curSpeed
+				curSpeed = curSpeed + speedInc
+			end
+
+			if direction.Backward then
+				new = new - camera.CFrame.LookVector * curSpeed
+				curSpeed = curSpeed + speedInc
+			end
+
+			if direction.Left then
+				new = new * CFrame.new(-curSpeed, 0, 0)
+				curSpeed = curSpeed + speedInc
+			end
+
+			if direction.Right then
+				new = new * CFrame.new(curSpeed, 0, 0)
+				curSpeed = curSpeed + speedInc
+			end
+			if direction.Shift then
+				speed *= 1.6525
+			end
+			if curSpeed > speed then
+				curSpeed = speed
+			end
+		end
+
+		humanoid.PlatformStand = true
+		bPos.Position = new.p
+		
+		if noclip then -- change the players collision group, now they can only interact with themselves!
+			for _, v in character:GetDescendants() do
+				if v:IsA("BasePart") then
+					v.CollisionGroup = "Noclip"
+				end
+			end
+		end
+		
+		if direction.Forward then
+			bGyro.CFrame = camera.CFrame*CFrame.Angles(-math.rad(curSpeed*15), 0, 0)
+		elseif direction.Backward then
+			bGyro.CFrame = camera.CFrame*CFrame.Angles(math.rad(curSpeed*15), 0, 0)
+		elseif direction.Left then
+			bGyro.CFrame = camera.CFrame*CFrame.Angles(0, math.rad(curSpeed*15), 0)
+		elseif direction.Right then
+			bGyro.CFrame = camera.CFrame*CFrame.Angles(0, -math.rad(curSpeed*15), 0)
+		else
+			bGyro.CFrame = camera.CFrame
+		end
+
+		rs.RenderStepped:Wait()
+	end
+
+	Stop()
+end
+
+function Stop()
+	flying = false
+	humanoid.PlatformStand = false
+	
+	if humChanged then
+		humChanged:Disconnect() -- no error here, humChanged wont be defined until the script is enabled/the loop is ran
+	end
+	
+	if bPos then
+		bPos:Destroy()
+	end
+	
+	if bGyro then
+		bGyro:Destroy()
+	end
+	
+	if att then
+		att:Destroy()
+	end
+	
+	for _, v in character:GetDescendants() do -- reset collision (noclip)
+		if v:IsA("BasePart") then
+			v.CollisionGroup = "Default"
+		end
+	end
+end
+
+local debounce = false
+
+function Toggle() -- toggle object/player flight
+	if not debounce then
+		debounce = true
+		if not flying then
+			flying = true
+			coroutine.wrap(Start)()
+		else
+			flying = false
+			Stop()
+		end
+		task.wait(.5)
+		debounce = false
+	end
+end
+
+local function handleInput(input, isGame, bool)
+	if not isGame then
+		local key = input.KeyCode
+		
+		if input.UserInputType == Enum.UserInputType.Touch then
+			key = Enum.KeyCode.W
+		end
+		
+		--[[general rule: if the key that is pressed is equal to a directional key
+		(w,a,s,d,space,z,shift) then move in the corresponding direction]]
+		
+		if key == Enum.KeyCode.W then
+			keyTab.Forward = bool
+			direction.Forward = bool
+		elseif key == Enum.KeyCode.A then
+			keyTab.Left = bool
+			direction.Left = bool
+		elseif key == Enum.KeyCode.S then
+			keyTab.Backward = bool
+			direction.Backward = bool
+		elseif key == Enum.KeyCode.D then
+			keyTab.Right = bool
+			direction.Right = bool
+		elseif key == Enum.KeyCode.Z then
+			keyTab.Down = bool
+			direction.Down = bool
+		elseif key == Enum.KeyCode.Space then
+			keyTab.Up = bool
+			direction.Up = bool
+		elseif key == Enum.KeyCode.LeftShift then
+			keyTab.Shift = bool
+			direction.Shift = bool
+		end
+	end
+end
+
+uis.InputBegan:Connect(function(input, gpe_)
+	handleInput(input, gpe_, true)
+end)
+
+uis.InputEnded:Connect(function(input, gpe_)
+	handleInput(input, gpe_, false)
+end)
+
+game.ReplicatedStorage.flight.OnClientEvent:Connect(function(newSpeed)
+	
+	----- SETTINGS -----
+
+	if tonumber(speed) == nil then -- if set speed doesnt exist revert to default (2)
+		speed = 2 -- default speed
+	else
+		speed = newSpeed 
+	end
+	
+	noclip = player.PlayerGui.Fly.Background.Noclip.Value.Value -- boolean, decides if player will noclip or not
+	print(noclip)
+	
+	--------------------
+	
+	if script.Flying.Value == true then
+		Toggle()
+		script.Flying.Value = false
+	else
+		Toggle()
+		script.Flying.Value = true
+	end
+end)
+
+player.CharacterAdded:Connect(function()
+	coroutine.wrap(Start)() -- when the player's character loads, enable the script 
+end)
